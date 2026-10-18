@@ -1,0 +1,142 @@
+# Publishes this package to npm with an npm provenance statement, as n8n
+# requires for verified community nodes (published from GitHub Actions, with
+# provenance, never from a local machine).
+#
+# Based on n8n-io/n8n-nodes-starter's publish.yml, with these differences:
+#   - Manual only (workflow_dispatch). Nothing is published on push or on a
+#     tag: a maintainer runs it from the Actions tab, on main.
+#   - npm trusted publishing (OIDC) only. There is no NPM_TOKEN fallback, so
+#     the package can be set to "Require two-factor authentication and
+#     disallow tokens" on npmjs.com.
+#   - It refuses to run when the version in package.json is already on npm,
+#     when its git tag already exists, or when package.json's repository.url
+#     does not match this repository exactly (npm rejects provenance then).
+#   - Tests run before publishing, and the v<version> tag is pushed after a
+#     successful publish (the starter pushes the tag first, from a laptop).
+#
+# One-time setup on npmjs.com (package → Settings → Trusted Publisher):
+#   GitHub Actions · owner WhatsArabHQ · repository n8n-nodes-whatsarab ·
+#   workflow publish.yml · environment left blank.
+#
+# Release process: bump "version" in package.json (upstream, so the mirror
+# brings it here), then Actions → Publish → Run workflow on main.
+
+name: Publish
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish to npm
+    # Forks and copies of this repository never publish.
+    if: github.repository == 'WhatsArabHQ/n8n-nodes-whatsarab'
+    runs-on: ubuntu-latest
+    # A hang (e.g. in npm publish) must not keep the runner and its OIDC token alive.
+    timeout-minutes: 15
+    permissions:
+      # Mints the OIDC token npm uses for trusted publishing and provenance.
+      id-token: write
+      # Pushes the v<version> tag after a successful publish. Nothing else is written.
+      contents: write
+    steps:
+      - name: Refuse any branch but main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Publish only from main (this run is on ${GITHUB_REF})."
+          exit 1
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # npm trusted publishing needs npm >= 11.5.1 and Node >= 22.14.0; Node 22 ships npm 10.
+      - name: Use npm 11
+        run: npm install -g npm@11.21.0
+
+      - name: Check toolchain versions
+        run: |
+          node -e '
+            const [maj, min] = process.versions.node.split(".").map(Number);
+            if (maj < 22 || (maj === 22 && min < 14)) { console.error(`Node ${process.versions.node} < 22.14.0`); process.exit(1); }
+          '
+          NPM_VERSION="$(npm --version)" node -e '
+            const [maj, min, pat] = process.env.NPM_VERSION.split(".").map(Number);
+            const ok = maj > 11 || (maj === 11 && (min > 5 || (min === 5 && pat >= 1)));
+            if (!ok) { console.error(`npm ${process.env.NPM_VERSION} < 11.5.1`); process.exit(1); }
+          '
+          echo "node $(node --version), npm $(npm --version)"
+
+      - name: Check package.json, tag and npm
+        run: |
+          NAME="$(node -p 'require("./package.json").name')"
+          VERSION="$(node -p 'require("./package.json").version')"
+          EXPECTED_URL="git+https://github.com/${GITHUB_REPOSITORY}.git"
+          ACTUAL_URL="$(node -p 'String((require("./package.json").repository || {}).url || "")')"
+          if [ "$ACTUAL_URL" != "$EXPECTED_URL" ]; then
+            echo "::error::package.json repository.url is '${ACTUAL_URL}', expected exactly '${EXPECTED_URL}' (npm rejects provenance otherwise)."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null; then
+            echo "::error::Tag v${VERSION} already exists. Bump the version upstream first."
+            exit 1
+          fi
+          if ! VERSIONS="$(npm view "$NAME" versions --json 2>npm-view.err)"; then
+            cat npm-view.err
+            echo "::error::Could not read ${NAME} from npm. Trusted publishing only works for a package that already exists: publish the first version manually, then add the trusted publisher."
+            exit 1
+          fi
+          if VERSIONS="$VERSIONS" VERSION="$VERSION" node -e '
+            const v = JSON.parse(process.env.VERSIONS);
+            process.exit([].concat(v).includes(process.env.VERSION) ? 0 : 1);
+          '; then
+            echo "::error::${NAME}@${VERSION} is already on npm. Bump the version upstream first."
+            exit 1
+          fi
+          rm -f npm-view.err
+          echo "Publishing ${NAME}@${VERSION}"
+          echo "PKG_NAME=${NAME}" >> "$GITHUB_ENV"
+          echo "PKG_VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Install
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      # @n8n/node-cli's release command (as in the starter): on GitHub Actions it
+      # runs lint and build, then `npm publish` with NPM_CONFIG_PROVENANCE=true.
+      # publishConfig.access in package.json makes the scoped package public.
+      # No token is configured: npm exchanges the job's OIDC token instead.
+      - name: Publish with provenance
+        run: npm run release
+
+      - name: Confirm the version is on npm
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if [ "$(npm view "${PKG_NAME}@${PKG_VERSION}" version 2>/dev/null)" = "$PKG_VERSION" ]; then
+              echo "${PKG_NAME}@${PKG_VERSION} is on npm"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::${PKG_NAME}@${PKG_VERSION} not visible on npm yet (registry lag); the tag is pushed anyway."
+
+      - name: Tag the release
+        run: |
+          git tag "v${PKG_VERSION}" "$GITHUB_SHA"
+          git push origin "refs/tags/v${PKG_VERSION}"

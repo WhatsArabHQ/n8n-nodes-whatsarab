@@ -1,0 +1,64 @@
+{
+	"name": "@whatsarab/n8n-nodes-whatsarab",
+	"version": "0.1.0",
+	"description": "n8n nodes for WhatsArab: send WhatsApp text and template messages and manage contacts through the WhatsArab API, and start workflows from signed WhatsArab webhooks.",
+	"license": "MIT",
+	"homepage": "https://github.com/WhatsArabHQ/n8n-nodes-whatsarab#readme",
+	"keywords": [
+		"n8n-community-node-package",
+		"n8n",
+		"whatsapp",
+		"whatsarab",
+		"whatsapp-business-api"
+	],
+	"author": {
+		"name": "WhatsArab",
+		"email": "support@whatsarab.com"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/WhatsArabHQ/n8n-nodes-whatsarab.git"
+	},
+	"bugs": {
+		"url": "https://github.com/WhatsArabHQ/n8n-nodes-whatsarab/issues"
+	},
+	"scripts": {
+		"build": "n8n-node build",
+		"build:watch": "tsc --watch",
+		"dev": "n8n-node dev",
+		"lint": "n8n-node lint",
+		"lint:fix": "n8n-node lint --fix",
+		"typecheck": "tsc --noEmit",
+		"test": "tsc && node --test \"test/*.test.js\"",
+		"release": "n8n-node release",
+		"prepublishOnly": "n8n-node prerelease"
+	},
+	"files": [
+		"dist"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"strict": true,
+		"credentials": [
+			"dist/credentials/WhatsArabApi.credentials.js",
+			"dist/credentials/WhatsArabWebhookApi.credentials.js"
+		],
+		"nodes": [
+			"dist/nodes/WhatsArab/WhatsArab.node.js",
+			"dist/nodes/WhatsArabTrigger/WhatsArabTrigger.node.js"
+		]
+	},
+	"devDependencies": {
+		"@n8n/node-cli": "0.52.5",
+		"eslint": "9.32.0",
+		"n8n-workflow": "2.43.5",
+		"prettier": "3.6.2",
+		"typescript": "5.9.2"
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	}
+}

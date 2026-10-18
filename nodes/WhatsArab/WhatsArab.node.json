@@ -1,0 +1,18 @@
+{
+	"node": "@whatsarab/n8n-nodes-whatsarab.whatsArab",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Communication"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://whatsarab.com/docs"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://whatsarab.com/docs"
+			}
+		]
+	}
+}
