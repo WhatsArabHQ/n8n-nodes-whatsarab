@@ -28,7 +28,11 @@ function asStatus(value: unknown): number | undefined {
 	return typeof n === 'number' && Number.isInteger(n) && n >= 100 && n <= 599 ? n : undefined;
 }
 
-function bodyError(body: unknown): { code?: string; message?: string } {
+function bodyError(raw: unknown): { code?: string; message?: string } {
+	// A binary download (GET /api/media/{id}) fails with its JSON error body as bytes.
+	let body: unknown = raw;
+	if (body instanceof ArrayBuffer) body = Buffer.from(body);
+	if (Buffer.isBuffer(body)) body = body.toString('utf8');
 	let parsed: unknown = body;
 	if (typeof body === 'string') {
 		try {

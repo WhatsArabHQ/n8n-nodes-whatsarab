@@ -142,7 +142,7 @@ export class WhatsArabTrigger implements INodeType {
 		// `app.description = trigger.description`). So this line describes the whole
 		// integration, not the trigger alone. test/descriptions.test.js holds it there.
 		description:
-			'Send WhatsApp messages and templates, manage contacts and tags, and start workflows from WhatsArab events',
+			'Send WhatsApp messages, media, buttons, lists and templates, manage contacts and tags, and start workflows from WhatsArab events',
 		defaults: {
 			name: 'WhatsArab Trigger',
 		},

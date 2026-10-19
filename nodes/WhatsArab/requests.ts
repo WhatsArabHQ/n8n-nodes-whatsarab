@@ -84,6 +84,38 @@ export function buildSendTextBody(recipient: Recipient, text: string, options: C
 	return { ...recipientFields(recipient), text, ...commonFields(options) };
 }
 
+/** An interactive object from interactive.ts (buttons, list or CTA URL). */
+export function buildSendInteractiveBody(
+	recipient: Recipient,
+	interactive: ApiJsonObject,
+	options: CommonSendOptions = {},
+): ApiJsonObject {
+	return { ...recipientFields(recipient), interactive, ...commonFields(options) };
+}
+
+export type MediaKind = 'image' | 'video' | 'audio' | 'document' | 'sticker';
+
+export interface MediaInput {
+	kind: MediaKind;
+	/** A WhatsApp media id: from Media → Upload, a send's own upload, or an incoming message. */
+	id: string;
+	/** Image, video and document only; WhatsApp ignores it elsewhere, so it is not sent. */
+	caption?: string;
+	/** Document only: the file name the customer sees. */
+	filename?: string;
+}
+
+const CAPTION_KINDS = new Set<MediaKind>(['image', 'video', 'document']);
+
+export function buildSendMediaBody(recipient: Recipient, media: MediaInput, options: CommonSendOptions = {}): ApiJsonObject {
+	const out: ApiJsonObject = { id: String(media.id).trim(), kind: media.kind };
+	const caption = media.caption ?? '';
+	if (caption.trim() && CAPTION_KINDS.has(media.kind)) out.caption = caption;
+	const filename = media.filename?.trim();
+	if (filename && media.kind === 'document') out.filename = filename;
+	return { ...recipientFields(recipient), media: out, ...commonFields(options) };
+}
+
 export interface TemplateInput {
 	name: string;
 	language: string;

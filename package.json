@@ -1,7 +1,7 @@
 {
 	"name": "@whatsarab/n8n-nodes-whatsarab",
-	"version": "0.1.0",
-	"description": "n8n nodes for WhatsArab: send WhatsApp text and template messages and manage contacts through the WhatsArab API, and start workflows from signed WhatsArab webhooks.",
+	"version": "0.2.0",
+	"description": "n8n nodes for WhatsArab: send WhatsApp text, media, buttons, lists and templates, manage contacts and tags through the WhatsArab API, and start workflows from signed WhatsArab webhooks.",
 	"license": "MIT",
 	"homepage": "https://github.com/WhatsArabHQ/n8n-nodes-whatsarab#readme",
 	"keywords": [

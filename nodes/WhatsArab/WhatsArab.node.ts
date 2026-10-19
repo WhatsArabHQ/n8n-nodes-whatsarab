@@ -1,9 +1,10 @@
+import { randomBytes } from 'crypto';
 import type {
+	IBinaryData,
 	IDataObject,
 	IExecuteFunctions,
 	ILoadOptionsFunctions,
 	INodeExecutionData,
-	INodeProperties,
 	INodePropertyOptions,
 	INodeType,
 	INodeTypeDescription,
@@ -11,7 +12,8 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
-import { MESSAGES_PATH, NUMBERS_PATH, TEMPLATES_PATH } from './api';
+import { MEDIA_PATH, MESSAGES_PATH, NUMBERS_PATH, TEMPLATES_PATH } from './api';
+import { apiErrorInfo } from './apiErrors';
 import {
 	addContactTagRequest,
 	type ApiRequest,
@@ -22,11 +24,40 @@ import {
 	upsertContactRequest,
 } from './contacts';
 import {
+	buildCtaUrl,
+	buildList,
+	buildReplyButtons,
+	type InteractiveFrame,
+	type ListRowInput,
+	type ReplyButtonInput,
+} from './interactive';
+import {
+	bareMimeType,
+	buildMultipart,
+	checkMediaId,
+	checkMediaSize,
+	fileNameFromUrl,
+	MAX_MEDIA_BYTES,
+	mediaFileName,
+	type MultipartFile,
+} from './media';
+import {
+	contactProperties,
+	mediaProperties,
+	messageProperties,
+	numberProperties,
+	templateProperties,
+} from './properties';
+import {
 	type ApiJsonObject,
 	type ApiNumber,
 	type ApiTemplate,
+	buildSendInteractiveBody,
+	buildSendMediaBody,
 	buildSendTemplateBody,
 	buildSendTextBody,
+	type CommonSendOptions,
+	type MediaKind,
 	numberOptionName,
 	parseComponentsJson,
 	type ParseResult,
@@ -34,190 +65,7 @@ import {
 	type RecipientType,
 	templateOptions,
 } from './requests';
-import { whatsArabRequest } from './transport';
-
-/** Contact resource fields (POST/GET /api/contacts..., API key scope `send`). */
-const contactProperties: INodeProperties[] = [
-	{
-		displayName: 'Operation',
-		name: 'operation',
-		type: 'options',
-		noDataExpression: true,
-		displayOptions: { show: { resource: ['contact'] } },
-		options: [
-			{
-				name: 'Add Tag',
-				value: 'addTag',
-				description:
-					'Tag a contact as an agent would in the inbox: tag rules, tag-triggered flows and sequences, and the Tag Added webhook event all run',
-				action: 'Add a tag to a contact',
-			},
-			{
-				name: 'Create or Update',
-				value: 'upsert',
-				description: 'Create a new record, or update the current one if it already exists (upsert)',
-				action: 'Create or update a contact',
-			},
-			{
-				name: 'Get',
-				value: 'get',
-				description: 'Read one contact by phone number',
-				action: 'Get a contact',
-			},
-			{
-				name: 'Remove Tag',
-				value: 'removeTag',
-				description: 'Remove a tag from the contact and from every one of its conversations that carries it',
-				action: 'Remove a tag from a contact',
-			},
-		],
-		default: 'upsert',
-	},
-	{
-		displayName: 'Phone Number',
-		name: 'phone',
-		type: 'string',
-		required: true,
-		displayOptions: { show: { resource: ['contact'] } },
-		default: '',
-		placeholder: '201000000001',
-		description:
-			'International format with country code. Spaces, dashes, a leading + or 00 and Arabic digits are cleaned automatically.',
-	},
-	{
-		displayName: 'Tag',
-		name: 'tag',
-		type: 'string',
-		required: true,
-		displayOptions: { show: { resource: ['contact'], operation: ['addTag', 'removeTag'] } },
-		default: '',
-		placeholder: 'lead',
-		description:
-			'Normalized like every tag in WhatsArab (at most 40 characters once normalized). Adding a tag the contact already has, or removing one it does not have, succeeds and changes nothing.',
-	},
-	{
-		displayName: 'Number Name or ID',
-		name: 'from',
-		type: 'options',
-		typeOptions: { loadOptionsMethod: 'getNumbers' },
-		displayOptions: { show: { resource: ['contact'], operation: ['upsert', 'addTag'] } },
-		default: '',
-		description:
-			'Create or Update: whose audience the contact joins (audiences are only added, never removed). Add Tag: whose conversation with the customer gets the tag (Workspace Default: their most recent one). Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
-	},
-	{
-		displayName: 'Update Fields',
-		name: 'updateFields',
-		type: 'collection',
-		placeholder: 'Add Field',
-		displayOptions: { show: { resource: ['contact'], operation: ['upsert'] } },
-		default: {},
-		options: [
-			{
-				displayName: 'Consent',
-				name: 'consent',
-				type: 'options',
-				options: [
-					{
-						name: 'Leave Unchanged',
-						value: 'unchanged',
-					},
-					{
-						name: 'Opt In (Record Consent)',
-						value: 'optIn',
-						description:
-							'Records consent only on a contact that is not opted out. It never lifts an opt-out: a customer who opted out, or a block your team set, stays opted out (opted_out in the output says so).',
-					},
-					{
-						name: 'Opt Out',
-						value: 'optOut',
-						description:
-							'Opts the contact out. The API cannot lift an opt-out again; that is done deliberately in the WhatsArab dashboard.',
-					},
-				],
-				default: 'unchanged',
-				description: 'Opt-out is one-way through the API: it can be set, never lifted',
-			},
-			{
-				displayName: 'Name',
-				name: 'name',
-				type: 'string',
-				default: '',
-				description: 'Display name, 1 to 120 characters. Left empty, the current name is kept.',
-			},
-			{
-				displayName: 'Tags',
-				name: 'tags',
-				type: 'string',
-				default: '',
-				placeholder: 'lead, vip',
-				description:
-					'Comma-separated, up to 20. Tags are added to the ones the contact already has, never replacing them; use Remove Tag to take one off.',
-			},
-		],
-	},
-	{
-		displayName: 'Custom Fields',
-		name: 'customFields',
-		type: 'fixedCollection',
-		typeOptions: { multipleValues: true },
-		displayOptions: { show: { resource: ['contact'], operation: ['upsert'] } },
-		default: {},
-		placeholder: 'Add Custom Field',
-		description:
-			"Merged into the contact's custom fields key by key, up to 50 keys per call. Keys you do not list keep their value; Type Remove Field deletes a key.",
-		options: [
-			{
-				displayName: 'Field',
-				name: 'field',
-				values: [
-					{
-						displayName: 'Key',
-						name: 'key',
-						type: 'string',
-						default: '',
-						placeholder: 'city',
-						description: 'Custom field key, 1 to 64 characters',
-					},
-					{
-						displayName: 'Type',
-						name: 'type',
-						type: 'options',
-						options: [
-							{
-								name: 'Boolean',
-								value: 'boolean',
-								description: 'Value must be true or false',
-							},
-							{
-								name: 'Number',
-								value: 'number',
-							},
-							{
-								name: 'Remove Field',
-								value: 'remove',
-								description: 'Delete this key from the contact (sent as null). Value is ignored.',
-							},
-							{
-								name: 'Text',
-								value: 'string',
-								description: 'Up to 1000 characters',
-							},
-						],
-						default: 'string',
-					},
-					{
-						displayName: 'Value',
-						name: 'value',
-						type: 'string',
-						default: '',
-						description: 'Ignored when Type is Remove Field',
-					},
-				],
-			},
-		],
-	},
-];
+import { type RawRequest, whatsArabRawRequest, whatsArabRequest } from './transport';
 
 export class WhatsArab implements INodeType {
 	description: INodeTypeDescription = {
@@ -229,7 +77,8 @@ export class WhatsArab implements INodeType {
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
 		// Shown wherever this node stands alone (the AI-tool picker, the tool's default
 		// description). In the node search n8n shows the TRIGGER's description for the pair.
-		description: 'Send WhatsApp messages and templates, and manage contacts and tags with WhatsArab',
+		description:
+			'Send WhatsApp messages, media, buttons, lists and templates, and manage contacts and tags with WhatsArab',
 		defaults: {
 			name: 'WhatsArab',
 		},
@@ -254,166 +103,29 @@ export class WhatsArab implements INodeType {
 						value: 'contact',
 					},
 					{
+						name: 'Media',
+						value: 'media',
+					},
+					{
 						name: 'Message',
 						value: 'message',
+					},
+					{
+						name: 'Number',
+						value: 'number',
+					},
+					{
+						name: 'Template',
+						value: 'template',
 					},
 				],
 				default: 'message',
 			},
 			...contactProperties,
-			{
-				displayName: 'Operation',
-				name: 'operation',
-				type: 'options',
-				noDataExpression: true,
-				displayOptions: { show: { resource: ['message'] } },
-				options: [
-					{
-						name: 'Send Template',
-						value: 'sendTemplate',
-						description: 'Send an approved template. Works outside the 24-hour window.',
-						action: 'Send a template message',
-					},
-					{
-						name: 'Send Text',
-						value: 'sendText',
-						description: "Send free-form text. Only delivered inside the customer's 24-hour window.",
-						action: 'Send a text message',
-					},
-				],
-				default: 'sendText',
-			},
-			{
-				displayName: 'From Number Name or ID',
-				name: 'from',
-				type: 'options',
-				typeOptions: { loadOptionsMethod: 'getNumbers' },
-				displayOptions: { show: { resource: ['message'] } },
-				default: '',
-				description:
-					'Which of your WhatsArab numbers sends. Leave on Workspace Default to let WhatsArab choose. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
-			},
-			{
-				displayName: 'Recipient Type',
-				name: 'recipientType',
-				type: 'options',
-				displayOptions: { show: { resource: ['message'] } },
-				options: [
-					{
-						name: 'Phone Number',
-						value: 'phone',
-					},
-					{
-						name: 'WhatsApp User ID',
-						value: 'userId',
-						description:
-							'For a customer who wrote with a WhatsApp username and no phone: the fromUserId of a Message Received event',
-					},
-				],
-				default: 'phone',
-			},
-			{
-				displayName: 'Phone Number',
-				name: 'phone',
-				type: 'string',
-				required: true,
-				displayOptions: { show: { resource: ['message'], recipientType: ['phone'] } },
-				default: '',
-				placeholder: '201000000001',
-				description:
-					'International format with country code. Spaces, dashes, a leading + or 00 and Arabic digits are cleaned automatically.',
-			},
-			{
-				displayName: 'WhatsApp User ID',
-				name: 'userId',
-				type: 'string',
-				required: true,
-				displayOptions: { show: { resource: ['message'], recipientType: ['userId'] } },
-				default: '',
-				placeholder: 'EG.13491208655302741918',
-			},
-			{
-				displayName: 'Text',
-				name: 'text',
-				type: 'string',
-				required: true,
-				typeOptions: { rows: 4 },
-				displayOptions: { show: { resource: ['message'], operation: ['sendText'] } },
-				default: '',
-				description: 'Message body, up to 4096 characters',
-			},
-			{
-				displayName: 'Template Name or ID',
-				name: 'template',
-				type: 'options',
-				required: true,
-				typeOptions: { loadOptionsMethod: 'getTemplates', loadOptionsDependsOn: ['from'] },
-				displayOptions: { show: { resource: ['message'], operation: ['sendTemplate'] } },
-				default: '',
-				description:
-					`An approved template on the sending number's WhatsApp Business Account. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.`,
-			},
-			{
-				displayName: 'Language',
-				name: 'language',
-				type: 'string',
-				required: true,
-				displayOptions: { show: { resource: ['message'], operation: ['sendTemplate'] } },
-				default: 'en',
-				placeholder: 'ar',
-				description: 'Language code of one approved language of the template, for example ar or en',
-			},
-			{
-				displayName: 'Body Parameters',
-				name: 'bodyParameters',
-				type: 'fixedCollection',
-				typeOptions: { multipleValues: true, sortable: true },
-				displayOptions: { show: { resource: ['message'], operation: ['sendTemplate'] } },
-				default: {},
-				placeholder: 'Add Parameter',
-				description: 'Values for the template body placeholders, in order: the first fills {{1}}, the second {{2}}',
-				options: [
-					{
-						displayName: 'Parameter',
-						name: 'parameter',
-						values: [
-							{
-								displayName: 'Value',
-								name: 'value',
-								type: 'string',
-								default: '',
-							},
-						],
-					},
-				],
-			},
-			{
-				displayName: 'Options',
-				name: 'options',
-				type: 'collection',
-				placeholder: 'Add Option',
-				displayOptions: { show: { resource: ['message'] } },
-				default: {},
-				options: [
-					{
-						displayName: 'Components (JSON)',
-						name: 'components',
-						type: 'json',
-						default: '',
-						displayOptions: { show: { '/operation': ['sendTemplate'] } },
-						description:
-							'Full template components array (header, body and button parameters) in WhatsApp format. When set, it replaces Body Parameters.',
-					},
-					{
-						displayName: 'Dry Run',
-						name: 'dryRun',
-						type: 'boolean',
-						default: false,
-						description:
-							'Whether to only validate the request. Nothing is sent and no quota is used; for text the response says whether the 24-hour window is open.',
-					},
-				],
-			},
+			...messageProperties,
+			...mediaProperties,
+			...templateProperties,
+			...numberProperties,
 		],
 	};
 
@@ -447,29 +159,18 @@ export class WhatsArab implements INodeType {
 		const returnData: INodeExecutionData[] = [];
 
 		for (let i = 0; i < items.length; i++) {
-			let request: ApiRequest;
 			try {
-				request = buildRequest(this, i);
+				for (const out of await runItem(this, i)) returnData.push({ ...out, pairedItem: { item: i } });
 			} catch (error) {
-				const nodeError = new NodeOperationError(this.getNode(), error as Error, { itemIndex: i });
+				const nodeError =
+					error instanceof NodeApiError || error instanceof NodeOperationError
+						? error
+						: new NodeOperationError(this.getNode(), error as Error, { itemIndex: i });
 				if (this.continueOnFail()) {
 					returnData.push({ json: { error: nodeError.message }, pairedItem: { item: i } });
 					continue;
 				}
 				throw nodeError;
-			}
-
-			try {
-				const response = await whatsArabRequest.call(this, request.method, request.path, request.body);
-				const data = (response.data ?? response) as IDataObject;
-				returnData.push({ json: data, pairedItem: { item: i } });
-			} catch (error) {
-				const apiError = new NodeApiError(this.getNode(), error as JsonObject, { itemIndex: i });
-				if (this.continueOnFail()) {
-					returnData.push({ json: { error: apiError.message }, pairedItem: { item: i } });
-					continue;
-				}
-				throw apiError;
 			}
 		}
 
@@ -477,17 +178,92 @@ export class WhatsArab implements INodeType {
 	}
 }
 
-/** A builder's refusal becomes a NodeOperationError on the item. */
-function unwrap(ctx: IExecuteFunctions, i: number, result: ParseResult<ApiRequest>): ApiRequest {
-	if (!result.ok) throw new NodeOperationError(ctx.getNode(), result.message, { itemIndex: i });
-	return result.value;
+type Resource = 'contact' | 'media' | 'message' | 'number' | 'template';
+
+/** Runs the operation for item `i`. Most operations return one item; Get Many returns one per record. */
+async function runItem(ctx: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+	const resource = ctx.getNodeParameter('resource', i) as Resource;
+	switch (resource) {
+		case 'contact':
+			return [{ json: dataOf(await callJson(ctx, i, buildContactRequest(ctx, i))) }];
+		case 'message':
+			return [{ json: await sendMessage(ctx, i) }];
+		case 'media':
+			return await runMedia(ctx, i);
+		case 'template': {
+			const from = String(ctx.getNodeParameter('from', i, '') ?? '').trim();
+			const response = await callJson(ctx, i, {
+				method: 'GET',
+				path: TEMPLATES_PATH,
+				qs: from ? { from } : undefined,
+			});
+			const approvedOnly = ctx.getNodeParameter('approvedOnly', i, false) as boolean;
+			return listOf(response)
+				.filter((t) => !approvedOnly || String(t.status ?? '').toUpperCase() === 'APPROVED')
+				.map((json) => ({ json }));
+		}
+		case 'number':
+			return listOf(await callJson(ctx, i, { method: 'GET', path: NUMBERS_PATH })).map((json) => ({ json }));
+		default: {
+			// Compile-time exhaustiveness: a new Resource without a case fails to build.
+			const unsupported: never = resource;
+			throw new NodeOperationError(ctx.getNode(), `Unsupported resource "${String(unsupported)}"`, {
+				itemIndex: i,
+			});
+		}
+	}
 }
 
-/** Reads the node's parameters for item `i` and builds the API request. */
-function buildRequest(ctx: IExecuteFunctions, i: number): ApiRequest {
-	const resource = ctx.getNodeParameter('resource', i) as string;
-	if (resource === 'contact') return buildContactRequest(ctx, i);
-	return { method: 'POST', path: MESSAGES_PATH, body: buildMessageBody(ctx, i) };
+/**
+ * A failed WhatsArab call as an n8n error that leads with WhatsArab's own
+ * message (also for a binary download, whose error body arrives as bytes)
+ * and names the error code, so a workflow can be fixed from the error alone.
+ */
+function apiError(ctx: IExecuteFunctions, error: unknown, i: number, note?: string): NodeApiError {
+	const info = apiErrorInfo(error);
+	const description = [info.code ? `WhatsArab error code: ${info.code}.` : '', note ?? ''].filter(Boolean).join(' ');
+	const nodeError = new NodeApiError(ctx.getNode(), error as JsonObject, {
+		itemIndex: i,
+		...(info.message ? { message: info.message } : {}),
+		...(info.status ? { httpCode: String(info.status) } : {}),
+	});
+	// Set after construction: for a JSON error body NodeApiError replaces a passed
+	// description with the body's message, then drops it as equal to the message.
+	if (description) nodeError.description = description;
+	return nodeError;
+}
+
+/** `note` is appended to the error's description when the call fails. */
+async function callRaw(ctx: IExecuteFunctions, i: number, request: RawRequest, note?: string): Promise<unknown> {
+	try {
+		return await whatsArabRawRequest.call(ctx, request);
+	} catch (error) {
+		throw apiError(ctx, error, i, note);
+	}
+}
+
+async function callJson(
+	ctx: IExecuteFunctions,
+	i: number,
+	request: ApiRequest | RawRequest,
+	note?: string,
+): Promise<IDataObject> {
+	return (await callRaw(ctx, i, { ...request, json: true }, note)) as IDataObject;
+}
+
+/** The `data` object of a WhatsArab answer (`{ success, data }`). */
+function dataOf(response: IDataObject): IDataObject {
+	return (response.data ?? response) as IDataObject;
+}
+
+function listOf(response: IDataObject): IDataObject[] {
+	return (Array.isArray(response.data) ? response.data : []) as IDataObject[];
+}
+
+/** A builder's refusal becomes a NodeOperationError on the item. */
+function unwrap<T>(ctx: IExecuteFunctions, i: number, result: ParseResult<T>): T {
+	if (!result.ok) throw new NodeOperationError(ctx.getNode(), result.message, { itemIndex: i });
+	return result.value;
 }
 
 /** The Contact operation values declared in contactProperties. */
@@ -541,37 +317,295 @@ function buildContactRequest(ctx: IExecuteFunctions, i: number): ApiRequest {
 	}
 }
 
-/** Reads the node's parameters for item `i` and builds the POST /api/messages body. */
-function buildMessageBody(ctx: IExecuteFunctions, i: number): ApiJsonObject {
-	const operation = ctx.getNodeParameter('operation', i) as string;
+/** The Message operation values declared in messageProperties. */
+type MessageOperation = 'sendText' | 'sendTemplate' | 'sendMedia' | 'sendButtons' | 'sendList' | 'sendCtaUrl';
+
+interface MessageOptions {
+	components?: unknown;
+	dryRun?: boolean;
+	headerText?: string;
+	footerText?: string;
+}
+
+type Send = (body: ApiJsonObject, errorNote?: string) => Promise<IDataObject>;
+
+/** Sends one message for item `i` and returns the API's `data` object. */
+async function sendMessage(ctx: IExecuteFunctions, i: number): Promise<IDataObject> {
+	const operation = ctx.getNodeParameter('operation', i) as MessageOperation;
 	const recipientType = ctx.getNodeParameter('recipientType', i) as RecipientType;
 	const recipient: Recipient = {
 		type: recipientType,
 		value: ctx.getNodeParameter(recipientType === 'userId' ? 'userId' : 'phone', i) as string,
 	};
-	const from = ctx.getNodeParameter('from', i, '') as string;
-	const options = ctx.getNodeParameter('options', i, {}) as { components?: unknown; dryRun?: boolean };
-	const common = { from, dryRun: options.dryRun === true };
+	const options = ctx.getNodeParameter('options', i, {}) as MessageOptions;
+	const common: CommonSendOptions = {
+		from: ctx.getNodeParameter('from', i, '') as string,
+		dryRun: options.dryRun === true,
+	};
+	const frame: InteractiveFrame = { headerText: options.headerText, footerText: options.footerText };
+	const send: Send = async (body, errorNote) =>
+		dataOf(await callJson(ctx, i, { method: 'POST', path: MESSAGES_PATH, body }, errorNote));
 
-	if (operation === 'sendText') {
-		return buildSendTextBody(recipient, ctx.getNodeParameter('text', i) as string, common);
-	}
-	if (operation === 'sendTemplate') {
-		const params = ctx.getNodeParameter('bodyParameters.parameter', i, []) as Array<{ value: string }>;
-		const components = parseComponentsJson(options.components);
-		if (!components.ok) {
-			throw new NodeOperationError(ctx.getNode(), components.message, { itemIndex: i });
+	switch (operation) {
+		case 'sendText':
+			return await send(buildSendTextBody(recipient, ctx.getNodeParameter('text', i) as string, common));
+		case 'sendTemplate': {
+			const params = ctx.getNodeParameter('bodyParameters.parameter', i, []) as Array<{ value: string }>;
+			const components = unwrap(ctx, i, parseComponentsJson(options.components));
+			return await send(
+				buildSendTemplateBody(
+					recipient,
+					{
+						name: ctx.getNodeParameter('template', i) as string,
+						language: ctx.getNodeParameter('language', i) as string,
+						bodyParameters: params.map((p) => p.value),
+						components,
+					},
+					common,
+				),
+			);
 		}
-		return buildSendTemplateBody(
-			recipient,
-			{
-				name: ctx.getNodeParameter('template', i) as string,
-				language: ctx.getNodeParameter('language', i) as string,
-				bodyParameters: params.map((p) => p.value),
-				components: components.value,
-			},
-			common,
-		);
+		case 'sendButtons': {
+			const buttons = ctx.getNodeParameter('buttons.button', i, []) as ReplyButtonInput[];
+			const interactive = unwrap(ctx, i, buildReplyButtons(ctx.getNodeParameter('bodyText', i), buttons, frame));
+			return await send(buildSendInteractiveBody(recipient, interactive, common));
+		}
+		case 'sendList': {
+			const rows = ctx.getNodeParameter('rows.row', i, []) as ListRowInput[];
+			const interactive = unwrap(
+				ctx,
+				i,
+				buildList(ctx.getNodeParameter('bodyText', i), ctx.getNodeParameter('buttonText', i), rows, frame),
+			);
+			return await send(buildSendInteractiveBody(recipient, interactive, common));
+		}
+		case 'sendCtaUrl': {
+			const interactive = unwrap(
+				ctx,
+				i,
+				buildCtaUrl(
+					ctx.getNodeParameter('bodyText', i),
+					ctx.getNodeParameter('buttonText', i),
+					ctx.getNodeParameter('ctaUrl', i),
+					frame,
+				),
+			);
+			return await send(buildSendInteractiveBody(recipient, interactive, common));
+		}
+		case 'sendMedia':
+			return await sendMedia(ctx, i, recipient, common, send);
+		default: {
+			// Compile-time exhaustiveness: a new MessageOperation without a case fails to build.
+			const unsupported: never = operation;
+			throw new NodeOperationError(ctx.getNode(), `Unsupported operation "${String(unsupported)}"`, {
+				itemIndex: i,
+			});
+		}
 	}
-	throw new NodeOperationError(ctx.getNode(), `Unsupported operation "${operation}"`, { itemIndex: i });
+}
+
+type MediaSource = 'binary' | 'url' | 'id';
+
+/**
+ * Send Media. A file (binary or URL) is first uploaded through POST
+ * /api/media from the chosen number, then sent from THE NUMBER THE UPLOAD
+ * BELONGS TO: WhatsApp refuses a media id in a send from any other number.
+ * A dry run reads and checks the file but uploads nothing.
+ */
+async function sendMedia(
+	ctx: IExecuteFunctions,
+	i: number,
+	recipient: Recipient,
+	common: CommonSendOptions,
+	send: Send,
+): Promise<IDataObject> {
+	const kind = ctx.getNodeParameter('mediaKind', i) as MediaKind;
+	const source = ctx.getNodeParameter('mediaSource', i) as MediaSource;
+	const caption = ctx.getNodeParameter('caption', i, '') as string;
+	const typedName = String(ctx.getNodeParameter('fileName', i, '') ?? '').trim();
+
+	if (source === 'id') {
+		const id = unwrap(ctx, i, checkMediaId(ctx.getNodeParameter('mediaId', i)));
+		return await send(buildSendMediaBody(recipient, { kind, id, caption, filename: typedName }, common));
+	}
+
+	const file = source === 'url' ? await fileFromUrl(ctx, i) : await fileFromBinary(ctx, i);
+	unwrap(ctx, i, checkMediaSize(file.data.length));
+	const filename = typedName || file.fileName;
+
+	if (common.dryRun) {
+		// Nothing is uploaded on a dry run. POST /api/messages validates a dry run
+		// without looking the media id up, so a placeholder id stands in for it.
+		return await send(buildSendMediaBody(recipient, { kind, id: '0', caption, filename }, common));
+	}
+
+	const uploaded = await uploadFile(ctx, i, file, common.from);
+	const mediaId = String(uploaded.media_id ?? '').trim();
+	if (!mediaId) {
+		throw new NodeOperationError(ctx.getNode(), 'WhatsArab accepted the upload but returned no media_id', {
+			itemIndex: i,
+		});
+	}
+	const owner = (uploaded.from as IDataObject | null | undefined)?.number_id;
+	const from = typeof owner === 'string' && owner ? owner : common.from;
+	// If the send fails, the file is already on WhatsApp: the error says so, so a
+	// retry can reuse it (Media Source: Media ID) instead of uploading again.
+	const reuse = `The file was uploaded first: media ID ${mediaId} on number ${from || 'Workspace Default'}, kept by WhatsApp for about 30 days.`;
+	const sent = await send(buildSendMediaBody(recipient, { kind, id: mediaId, caption, filename }, { ...common, from }), reuse);
+	return { ...sent, media_id: mediaId };
+}
+
+async function fileFromBinary(ctx: IExecuteFunctions, i: number): Promise<MultipartFile> {
+	const property = ctx.getNodeParameter('binaryPropertyName', i) as string;
+	const binary: IBinaryData = ctx.helpers.assertBinaryData(i, property);
+	const data = await ctx.helpers.getBinaryDataBuffer(i, property);
+	return {
+		data,
+		fileName: binary.fileName || `file${binary.fileExtension ? `.${binary.fileExtension}` : ''}`,
+		mimeType: binary.mimeType || 'application/octet-stream',
+	};
+}
+
+async function fileFromUrl(ctx: IExecuteFunctions, i: number): Promise<MultipartFile> {
+	const url = String(ctx.getNodeParameter('mediaUrl', i) ?? '').trim();
+	if (!/^https?:\/\/\S+$/i.test(url)) {
+		throw new NodeOperationError(ctx.getNode(), 'File URL must be a full http:// or https:// address', {
+			itemIndex: i,
+		});
+	}
+	// Streamed, so a file over the upload limit is cut off at 16 MB instead of
+	// being buffered whole in the n8n worker first.
+	const abort = new AbortController();
+	const failed = (error: unknown) =>
+		new NodeOperationError(ctx.getNode(), `Could not download the file from ${url}: ${(error as Error).message}`, {
+			itemIndex: i,
+		});
+	let response: { body: unknown; headers?: IDataObject };
+	try {
+		response = (await ctx.helpers.httpRequest({
+			method: 'GET',
+			url,
+			encoding: 'stream',
+			returnFullResponse: true,
+			abortSignal: abort.signal,
+		})) as { body: unknown; headers?: IDataObject };
+	} catch (error) {
+		throw failed(error);
+	}
+	const declared = Number(response.headers?.['content-length']);
+	if (Number.isFinite(declared) && declared > MAX_MEDIA_BYTES) {
+		abort.abort();
+		unwrap(ctx, i, checkMediaSize(declared));
+	}
+	let data: Buffer;
+	try {
+		data = await readCapped(response.body, MAX_MEDIA_BYTES + 1, () => abort.abort());
+	} catch (error) {
+		throw failed(error);
+	}
+	return {
+		data,
+		fileName: fileNameFromUrl(url) || 'file',
+		mimeType: bareMimeType(response.headers?.['content-type']),
+	};
+}
+
+/**
+ * Reads a response body into memory, stopping at `limit` bytes: past it the
+ * stream is destroyed and what was read is returned (its length then fails
+ * checkMediaSize). A body that is already a Buffer or string passes through.
+ */
+async function readCapped(body: unknown, limit: number, onLimit: () => void): Promise<Buffer> {
+	if (!isReadable(body)) return toBuffer(body);
+	const chunks: Buffer[] = [];
+	let total = 0;
+	for await (const chunk of body) {
+		const buffer = toBuffer(chunk);
+		chunks.push(buffer);
+		total += buffer.length;
+		if (total >= limit) {
+			onLimit();
+			body.destroy();
+			break;
+		}
+	}
+	return Buffer.concat(chunks);
+}
+
+function isReadable(body: unknown): body is AsyncIterable<unknown> & { destroy: () => void } {
+	return (
+		typeof body === 'object' &&
+		body !== null &&
+		typeof (body as { destroy?: unknown }).destroy === 'function' &&
+		typeof (body as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === 'function'
+	);
+}
+
+function toBuffer(body: unknown): Buffer {
+	if (Buffer.isBuffer(body)) return body;
+	if (body instanceof ArrayBuffer) return Buffer.from(body);
+	if (typeof body === 'string') return Buffer.from(body, 'utf8');
+	if (body instanceof Uint8Array) return Buffer.from(body);
+	return Buffer.alloc(0);
+}
+
+/** POST /api/media with one file; returns the API's `data` (media_id, mime_type, size_bytes, from). */
+async function uploadFile(ctx: IExecuteFunctions, i: number, file: MultipartFile, from?: string): Promise<IDataObject> {
+	const fields: Record<string, string> = {};
+	const sender = from?.trim();
+	if (sender) fields.from = sender;
+	const multipart = buildMultipart(fields, file, `----WhatsArabN8n${randomBytes(12).toString('hex')}`);
+	const response = await callRaw(ctx, i, {
+		method: 'POST',
+		path: MEDIA_PATH,
+		headers: { 'Content-Type': multipart.contentType },
+		body: multipart.body,
+		json: false,
+	});
+	return dataOf(parseJson(response));
+}
+
+/** A JSON answer to a request sent without `json: true` (a raw body) can arrive as a string or bytes. */
+function parseJson(response: unknown): IDataObject {
+	if (Buffer.isBuffer(response)) return JSON.parse(response.toString('utf8')) as IDataObject;
+	if (typeof response === 'string') return JSON.parse(response) as IDataObject;
+	return (response ?? {}) as IDataObject;
+}
+
+type MediaOperation = 'upload' | 'download';
+
+async function runMedia(ctx: IExecuteFunctions, i: number): Promise<INodeExecutionData[]> {
+	const operation = ctx.getNodeParameter('operation', i) as MediaOperation;
+	const property = ctx.getNodeParameter('binaryPropertyName', i) as string;
+
+	if (operation === 'upload') {
+		const file = await fileFromBinary(ctx, i);
+		unwrap(ctx, i, checkMediaSize(file.data.length));
+		return [{ json: await uploadFile(ctx, i, file, ctx.getNodeParameter('from', i, '') as string) }];
+	}
+
+	const mediaId = String(ctx.getNodeParameter('mediaId', i) ?? '').trim();
+	if (!mediaId) throw new NodeOperationError(ctx.getNode(), 'Media ID is required', { itemIndex: i });
+	const response = (await callRaw(ctx, i, {
+		method: 'GET',
+		path: `${MEDIA_PATH}/${encodeURIComponent(mediaId)}`,
+		encoding: 'arraybuffer',
+		returnFullResponse: true,
+		json: false,
+	})) as { body: unknown; headers?: IDataObject };
+	const data = toBuffer(response.body);
+	if (data.length === 0) {
+		throw new NodeOperationError(ctx.getNode(), `WhatsArab returned no bytes for media ID ${mediaId}`, {
+			itemIndex: i,
+		});
+	}
+	const mimeType = bareMimeType(response.headers?.['content-type']);
+	const fileName = mediaFileName(mediaId, mimeType);
+	const binary = await ctx.helpers.prepareBinaryData(data, fileName, mimeType);
+	return [
+		{
+			json: { media_id: mediaId, mime_type: mimeType, size_bytes: data.length, file_name: fileName },
+			binary: { [property]: binary },
+		},
+	];
 }

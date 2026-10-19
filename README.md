@@ -1,8 +1,8 @@
 # @whatsarab/n8n-nodes-whatsarab
 
-n8n community nodes for [WhatsArab](https://whatsarab.com): send WhatsApp messages and manage contacts through the WhatsArab API, and start n8n workflows from signed WhatsArab webhooks.
+n8n community nodes for [WhatsArab](https://whatsarab.com): send WhatsApp text, media, buttons, lists and templates, manage contacts and tags through the WhatsArab API, and start n8n workflows from signed WhatsArab webhooks.
 
-> **Status: not published yet.** This package has not been released to npm or submitted to n8n. Until it is, install it from a local build (see [Development](#development)).
+WhatsArab runs on the official WhatsApp Business Platform (Meta's Cloud API), not on an unofficial WhatsApp Web client, so a number is never put at risk of a ban by the connection itself.
 
 Source: [github.com/WhatsArabHQ/n8n-nodes-whatsarab](https://github.com/WhatsArabHQ/n8n-nodes-whatsarab).
 
@@ -15,7 +15,9 @@ Source: [github.com/WhatsArabHQ/n8n-nodes-whatsarab](https://github.com/WhatsAra
 
 ## Installation
 
-Once published, install it in n8n from **Settings → Community Nodes → Install** with the package name `@whatsarab/n8n-nodes-whatsarab`. See the n8n [community nodes installation guide](https://docs.n8n.io/integrations/community-nodes/installation/).
+In a self-hosted n8n, install it from **Settings → Community Nodes → Install** with the package name `@whatsarab/n8n-nodes-whatsarab`. See the n8n [community nodes installation guide](https://docs.n8n.io/integrations/community-nodes/installation/).
+
+The package is published to npm with a provenance statement from this repository's Publish workflow.
 
 ## Credentials
 
@@ -30,7 +32,10 @@ Required API-key scopes:
 
 | What | Endpoints | Scope |
 | --- | --- | --- |
-| Message → Send Text / Send Template | `POST /api/messages` | `send` (or `full`) |
+| Message → every Send operation | `POST /api/messages` (and `POST /api/media` for a file or URL) | `send` (or `full`) |
+| Media → Upload | `POST /api/media` | `send` (or `full`) |
+| Media → Download | `GET /api/media/{id}` | `read` or `send` (or `full`) |
+| Template → Get Many, Number → Get Many | `GET /api/templates`, `GET /api/numbers` | `read` or `send` (or `full`) |
 | Contact → Create or Update, Add Tag, Remove Tag | `POST /api/contacts`, `POST /api/contacts/{phone}/tags`, `DELETE /api/contacts/{phone}/tags/{tag}` | `send` (or `full`) |
 | Contact → Get | `GET /api/contacts/{phone}` | `read` or `send` (or `full`) |
 | WhatsArab Trigger, Automatic mode | `GET /api/webhooks`, `POST /api/webhooks`, `DELETE /api/webhooks/{id}` | `full` |
@@ -47,21 +52,46 @@ This credential holds the **signing secret** of one webhook subscription you cre
 
 ### Message
 
-Both operations call `POST /api/messages`.
+Every operation calls `POST /api/messages`; Send Media with a file or URL calls `POST /api/media` first.
 
 | Operation | What it does |
 | --- | --- |
-| Send Text | Free-form text, up to 4096 characters. WhatsApp only delivers it inside the customer's 24-hour window (opened by their last message to the sending number). Outside it the API answers `OUTSIDE_CSW` and you need a template. |
-| Send Template | An approved template, with body parameters in order (`{{1}}`, `{{2}}` ...) or a full **Components (JSON)** array for header, body and button parameters. Works outside the 24-hour window. Templates count against your WhatsArab plan's monthly quota. |
+| Send Text | Free-form text, up to 4096 characters. |
+| Send Media | An image, video, audio file, document or sticker. **Media Source**: a **Binary File** from a previous node, a public **URL** (n8n downloads it), or a **Media ID** (from Media → Upload, or the `media.id` of a *Message Received* event). Up to 16 MB. **Caption** for image, video and document; **File Name** for documents (empty: the file's own name). |
+| Send Buttons | Body text with one to three reply buttons. |
+| Send List | Body text and a button that opens a menu of up to 10 rows. Rows with the same **Section** are grouped under that heading; rows without one share a section titled with the **Button Text**. |
+| Send Link Button | Body text with one button that opens a URL. |
+| Send Template | An approved template, with body parameters in order (`{{1}}`, `{{2}}` ...) or a full **Components (JSON)** array for header, body and button parameters. Templates count against your WhatsArab plan's monthly quota. |
+
+Everything except a template is free-form: WhatsApp only delivers it inside the customer's 24-hour window (opened by their last message to the sending number). Outside it the API answers `OUTSIDE_CSW` and you need a template, which works at any time.
 
 Common fields:
 
 - **From Number**: which of your WhatsArab numbers sends. The list comes from `GET /api/numbers`; *Workspace Default* lets WhatsArab choose.
 - **Recipient Type**: a phone number (international format; spaces, dashes, `+`, `00` and Arabic digits are cleaned), or a **WhatsApp User ID** for a customer who wrote with a WhatsApp username and no phone (the `fromUserId` of a *Message Received* event).
 - **Template Name**: approved templates of the sending number's WhatsApp Business Account, from `GET /api/templates`.
-- **Dry Run**: validate without sending. Nothing reaches Meta and no quota is used.
+- **Header Text** and **Footer Text** (Options, buttons, list and link button): an optional bold title and a small grey line.
+- **Dry Run**: validate without sending. Nothing reaches Meta, no file is uploaded and no quota is used.
 
-The node outputs the API's `data` object: `message_id` (the WhatsApp message id, to match delivery events), the recipient echoed back masked, `kind`, `status` (`sent`, or `dry_run` on a dry run, which also returns `quota_remaining` and, for text, `window_open`) and `from` (the number that sent). API errors (opted-out contact, closed window, invalid number...) surface as n8n errors carrying WhatsArab's error code; enable **Continue On Fail** to keep going per item.
+**Buttons and lists in a workflow.** A button or row **ID** (empty: its title) comes back when the customer taps it, in a *Message Received* event of the WhatsArab Trigger: `data.interactive.button_reply.id` for a button, `data.interactive.list_reply.id` for a list row. Route on it with a Switch node.
+
+**Media and numbers.** WhatsApp ties an uploaded media ID to the number that uploaded it and refuses it in a send from any other number. Send Media with a file or URL uploads from the chosen **From Number** and then sends from the number the upload answer names, so the two always match. To send one file to many customers, upload it once with Media → Upload and send its `media_id` with **Media Source** *Media ID* and the same number, instead of uploading it again for every item. WhatsApp keeps uploaded media for about 30 days.
+
+The node outputs the API's `data` object: `message_id` (the WhatsApp message id, to match delivery events), the recipient echoed back masked, `kind`, `status` (`sent`, or `dry_run` on a dry run, which also returns `quota_remaining` and, for free-form messages, `window_open`) and `from` (the number that sent). Send Media with a file or URL also outputs the `media_id` it uploaded. API errors (opted-out contact, closed window, invalid number...) surface as n8n errors that lead with WhatsArab's message and name its error code; enable **Continue On Fail** to keep going per item.
+
+### Media
+
+| Operation | Endpoint | What it does |
+| --- | --- | --- |
+| Upload | `POST /api/media` | Uploads a binary file (up to 16 MB) from the chosen **From Number** and outputs `media_id`, `mime_type`, `size_bytes` and `from` (the number the id belongs to). |
+| Download | `GET /api/media/{id}` | Downloads the file of an incoming message (the `media.id` of a *Message Received* event: a photo, voice note or document) into a binary field (default `data`), named `whatsapp-<id>.<ext>`. It can then go to a transcription, storage or AI node. |
+
+### Template and Number
+
+| Operation | Endpoint | What it does |
+| --- | --- | --- |
+| Template → Get Many | `GET /api/templates` | One item per template and language of a number's WhatsApp Business Account, with its `status` and `category`. **Approved Only** keeps just the ones you can send. |
+| Number → Get Many | `GET /api/numbers` | One item per WhatsArab number, the default first. A key restricted to some numbers sees only those. |
 
 ### Contact
 

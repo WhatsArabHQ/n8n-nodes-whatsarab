@@ -10,6 +10,8 @@ export const DEFAULT_BASE_URL = 'https://whatsarab.com';
 export const NUMBERS_PATH = '/api/numbers';
 export const TEMPLATES_PATH = '/api/templates';
 export const MESSAGES_PATH = '/api/messages';
+/** POST multipart upload → media id (scope `send`); GET /{id} incoming media bytes (scope `read` or `send`). */
+export const MEDIA_PATH = '/api/media';
 /** POST upsert; /{phone} read; /{phone}/tags add; /{phone}/tags/{tag} remove. Scope `send` (read: `read` or `send`). */
 export const CONTACTS_PATH = '/api/contacts';
 /** GET list, POST subscribe (secret returned once), DELETE /{id} unsubscribe. Scope `full`. */

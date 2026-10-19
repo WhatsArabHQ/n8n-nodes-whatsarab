@@ -3,6 +3,7 @@ import type {
 	IExecuteFunctions,
 	IHookFunctions,
 	IHttpRequestMethods,
+	IHttpRequestOptions,
 	ILoadOptionsFunctions,
 } from 'n8n-workflow';
 
@@ -24,12 +25,22 @@ export async function whatsArabRequest(
 	body?: IDataObject,
 	qs?: IDataObject,
 ): Promise<IDataObject> {
+	return (await whatsArabRawRequest.call(this, { method, path, body, qs, json: true })) as IDataObject;
+}
+
+export interface RawRequest extends Omit<IHttpRequestOptions, 'url'> {
+	path: string;
+}
+
+/**
+ * The same authenticated call with full control over the request: a raw
+ * multipart body (media upload) or a binary response (media download).
+ */
+export async function whatsArabRawRequest(this: WhatsArabRequestContext, request: RawRequest): Promise<unknown> {
+	const { path, ...options } = request;
 	const credentials = await this.getCredentials('whatsArabApi');
-	return (await this.helpers.httpRequestWithAuthentication.call(this, 'whatsArabApi', {
-		method,
+	return await this.helpers.httpRequestWithAuthentication.call(this, 'whatsArabApi', {
+		...options,
 		url: joinUrl(String(credentials.baseUrl ?? ''), path),
-		body,
-		qs,
-		json: true,
-	})) as IDataObject;
+	});
 }
