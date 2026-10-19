@@ -11,7 +11,7 @@ export class WhatsArabWebhookApi implements ICredentialType {
 
 	displayName = 'WhatsArab Webhook API';
 
-	icon: Icon = { light: 'file:../icons/whatsarab.svg', dark: 'file:../icons/whatsarab.svg' };
+	icon: Icon = { light: 'file:../icons/whatsarab.svg', dark: 'file:../icons/whatsarab.dark.svg' };
 
 	documentationUrl = 'https://whatsarab.com/docs';
 

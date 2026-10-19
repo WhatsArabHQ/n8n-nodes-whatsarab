@@ -223,11 +223,13 @@ export class WhatsArab implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'WhatsArab',
 		name: 'whatsArab',
-		icon: { light: 'file:../../icons/whatsarab.svg', dark: 'file:../../icons/whatsarab.svg' },
+		icon: { light: 'file:../../icons/whatsarab.svg', dark: 'file:../../icons/whatsarab.dark.svg' },
 		group: ['output'],
 		version: 1,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
-		description: 'Send WhatsApp messages and manage contacts through the WhatsArab API',
+		// Shown wherever this node stands alone (the AI-tool picker, the tool's default
+		// description). In the node search n8n shows the TRIGGER's description for the pair.
+		description: 'Send WhatsApp messages and templates, and manage contacts and tags with WhatsArab',
 		defaults: {
 			name: 'WhatsArab',
 		},

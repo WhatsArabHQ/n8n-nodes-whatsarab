@@ -133,11 +133,16 @@ export class WhatsArabTrigger implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'WhatsArab Trigger',
 		name: 'whatsArabTrigger',
-		icon: { light: 'file:../../icons/whatsarab.svg', dark: 'file:../../icons/whatsarab.svg' },
+		icon: { light: 'file:../../icons/whatsarab.svg', dark: 'file:../../icons/whatsarab.dark.svg' },
 		group: ['trigger'],
 		version: 1,
 		subtitle: '={{$parameter["events"].length ? $parameter["events"].join(", ") : "All events"}}',
-		description: 'Starts the workflow when WhatsArab delivers a signed webhook event',
+		// The node search merges this trigger into the WhatsArab node and ALWAYS shows the
+		// trigger's description for the merged entry (n8n editor-ui, useActionsGeneration:
+		// `app.description = trigger.description`). So this line describes the whole
+		// integration, not the trigger alone. test/descriptions.test.js holds it there.
+		description:
+			'Send WhatsApp messages and templates, manage contacts and tags, and start workflows from WhatsArab events',
 		defaults: {
 			name: 'WhatsArab Trigger',
 		},

@@ -151,7 +151,7 @@ Requires Node.js 22.
 npm ci --ignore-scripts
 npm run lint       # n8n's community-node linter (@n8n/node-cli, strict mode)
 npm run build      # compiles to dist/ and copies the icons
-npm test           # node:test against the compiled output
+npm test           # builds, then runs node:test against dist/
 npm run dev        # starts a local n8n with these nodes loaded
 ```
 

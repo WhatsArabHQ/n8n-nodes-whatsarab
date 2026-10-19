@@ -13,7 +13,7 @@ export class WhatsArabApi implements ICredentialType {
 
 	displayName = 'WhatsArab API';
 
-	icon: Icon = { light: 'file:../icons/whatsarab.svg', dark: 'file:../icons/whatsarab.svg' };
+	icon: Icon = { light: 'file:../icons/whatsarab.svg', dark: 'file:../icons/whatsarab.dark.svg' };
 
 	documentationUrl = 'https://whatsarab.com/docs';
 

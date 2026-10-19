@@ -29,7 +29,7 @@
 		"lint": "n8n-node lint",
 		"lint:fix": "n8n-node lint --fix",
 		"typecheck": "tsc --noEmit",
-		"test": "tsc && node --test \"test/*.test.js\"",
+		"test": "n8n-node build && node --test \"test/*.test.js\"",
 		"release": "n8n-node release",
 		"prepublishOnly": "n8n-node prerelease"
 	},

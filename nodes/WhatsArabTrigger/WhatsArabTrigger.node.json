@@ -2,7 +2,8 @@
 	"node": "@whatsarab/n8n-nodes-whatsarab.whatsArabTrigger",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
-	"categories": ["Communication"],
+	"categories": ["Communication", "Marketing & Content"],
+	"alias": ["WhatsApp", "WhatsApp Business", "WhatsApp API", "WABA", "Arabic", "Chat"],
 	"resources": {
 		"credentialDocumentation": [
 			{
