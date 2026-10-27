@@ -15,6 +15,8 @@ Source: [github.com/WhatsArabHQ/n8n-nodes-whatsarab](https://github.com/WhatsAra
 
 ## Installation
 
+The node is a verified community node on n8n Cloud: search for **WhatsArab** in the nodes panel of the canvas and drag it into your workflow. If it does not show up, an instance owner enables **Verified Community Nodes** in the n8n Cloud Admin Panel (the instance may need a restart).
+
 In a self-hosted n8n, install it from **Settings → Community Nodes → Install** with the package name `@whatsarab/n8n-nodes-whatsarab`. See the n8n [community nodes installation guide](https://docs.n8n.io/integrations/community-nodes/installation/).
 
 The package is published to npm with a provenance statement from this repository's Publish workflow.
