@@ -221,7 +221,13 @@ async function runItem(ctx: IExecuteFunctions, i: number): Promise<INodeExecutio
  */
 function apiError(ctx: IExecuteFunctions, error: unknown, i: number, note?: string): NodeApiError {
 	const info = apiErrorInfo(error);
-	const description = [info.code ? `WhatsArab error code: ${info.code}.` : '', note ?? ''].filter(Boolean).join(' ');
+	// Meta never answered the send: it may have gone out. Said in the error, so
+	// nobody turns on Retry On Fail for it and messages the customer twice.
+	const unknownOutcome =
+		info.code === 'SEND_OUTCOME_UNKNOWN'
+			? 'The message may already have been delivered: do not retry this item automatically — check its status (the WhatsArab trigger\'s message status events) first.'
+			: '';
+	const description = [info.code ? `WhatsArab error code: ${info.code}.` : '', unknownOutcome, note ?? ''].filter(Boolean).join(' ');
 	const nodeError = new NodeApiError(ctx.getNode(), error as JsonObject, {
 		itemIndex: i,
 		...(info.message ? { message: info.message } : {}),

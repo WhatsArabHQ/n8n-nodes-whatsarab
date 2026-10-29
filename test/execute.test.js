@@ -88,6 +88,24 @@ describe('Message → Send Text (unchanged)', () => {
 	});
 });
 
+describe('Message → a send Meta never answered', () => {
+	it('fails the item with SEND_OUTCOME_UNKNOWN and says not to retry it automatically', async () => {
+		const { ctx, calls } = fakeExecuteContext({
+			params: { resource: 'message', operation: 'sendText', ...PHONE, text: 'أهلًا' },
+			respond: () => {
+				throw httpError(409, 'SEND_OUTCOME_UNKNOWN', 'Meta did not answer the send.');
+			},
+		});
+		await assert.rejects(run(ctx), (error) => {
+			assert.equal(error.message, 'Meta did not answer the send.');
+			assert.match(error.description, /SEND_OUTCOME_UNKNOWN/);
+			assert.match(error.description, /do not retry this item automatically/);
+			return true;
+		});
+		assert.equal(calls.length, 1);
+	});
+});
+
 describe('Message → Send Buttons / List / Link Button', () => {
 	it('sends the interactive object with header and footer from Options', async () => {
 		const { ctx, calls } = fakeExecuteContext({
