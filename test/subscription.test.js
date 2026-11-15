@@ -8,6 +8,7 @@ const { NodeApiError } = require('n8n-workflow');
 const {
 	SCOPE_MESSAGE,
 	URL_HINT,
+	PLAN_LIMIT_HINT,
 	subscriptionModeOf,
 	WhatsArabTrigger,
 } = require('../dist/nodes/WhatsArabTrigger/WhatsArabTrigger.node');
@@ -453,6 +454,38 @@ describe('automatic subscription: refusals', () => {
 			assert.match(error.message, /INVALID_INPUT/);
 			assert.ok(error.description.includes('must be a public https URL'));
 			assert.ok(error.description.includes(URL_HINT));
+			return true;
+		});
+	});
+});
+
+describe('automatic subscription: plan limit', () => {
+	const hooks = new WhatsArabTrigger().webhookMethods.default;
+
+	it('PLAN_LIMIT_REACHED says old and switched-off subscriptions count, not only "upgrade"', async () => {
+		const f = fakeContext({
+			respond: () => {
+				throw apiError(409, 'PLAN_LIMIT_REACHED', 'Your plan allows 1 webhooks (currently 1). Upgrade to add more.');
+			},
+		});
+		await assert.rejects(hooks.create.call(f.ctx), (error) => {
+			assert.match(error.message, /PLAN_LIMIT_REACHED/);
+			assert.ok(error.description.includes('Your plan allows 1 webhooks'));
+			assert.ok(error.description.includes(PLAN_LIMIT_HINT));
+			assert.ok(!error.description.includes(URL_HINT));
+			return true;
+		});
+		assert.deepEqual(f.staticData, {});
+	});
+
+	it('the plan-limit hint stays off other refusals', async () => {
+		const f = fakeContext({
+			respond: () => {
+				throw apiError(409, 'SOMETHING_ELSE', 'no');
+			},
+		});
+		await assert.rejects(hooks.create.call(f.ctx), (error) => {
+			assert.ok(!String(error.description).includes(PLAN_LIMIT_HINT));
 			return true;
 		});
 	});

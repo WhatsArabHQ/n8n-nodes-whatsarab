@@ -215,6 +215,14 @@ async function runItem(ctx: IExecuteFunctions, i: number): Promise<INodeExecutio
 }
 
 /**
+ * Added when the spam breaker refused the send (AUTOMATION_SUPPRESSED) or the
+ * contact is opted out (CONTACT_OPTED_OUT, set by the team or by the breaker).
+ * From n8n the usual cause is a workflow that replies to its own events.
+ */
+export const LOOP_HINT =
+	'If this workflow sends to the same contact again and again, it is probably looping: a WhatsArab Trigger on every event also fires for the workflow\'s own replies (Message Sent, Delivered, Read). Lifting the block in WhatsArab will not help until the workflow is fixed: set the trigger\'s Events to Message Received only.';
+
+/**
  * A failed WhatsArab call as an n8n error that leads with WhatsArab's own
  * message (also for a binary download, whose error body arrives as bytes)
  * and names the error code, so a workflow can be fixed from the error alone.
@@ -227,7 +235,10 @@ function apiError(ctx: IExecuteFunctions, error: unknown, i: number, note?: stri
 		info.code === 'SEND_OUTCOME_UNKNOWN'
 			? 'The message may already have been delivered: do not retry this item automatically — check its status (the WhatsArab trigger\'s message status events) first.'
 			: '';
-	const description = [info.code ? `WhatsArab error code: ${info.code}.` : '', unknownOutcome, note ?? ''].filter(Boolean).join(' ');
+	const loop = info.code === 'AUTOMATION_SUPPRESSED' || info.code === 'CONTACT_OPTED_OUT' ? LOOP_HINT : '';
+	const description = [info.code ? `WhatsArab error code: ${info.code}.` : '', unknownOutcome, loop, note ?? '']
+		.filter(Boolean)
+		.join(' ');
 	const nodeError = new NodeApiError(ctx.getNode(), error as JsonObject, {
 		itemIndex: i,
 		...(info.message ? { message: info.message } : {}),

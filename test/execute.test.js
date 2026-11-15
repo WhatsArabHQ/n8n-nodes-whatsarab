@@ -88,6 +88,38 @@ describe('Message → Send Text (unchanged)', () => {
 	});
 });
 
+describe('Message → the spam breaker refused the send', () => {
+	for (const code of ['AUTOMATION_SUPPRESSED', 'CONTACT_OPTED_OUT']) {
+		it(`${code} says the workflow is probably looping and lifting the block will not help`, async () => {
+			const { ctx } = fakeExecuteContext({
+				params: { resource: 'message', operation: 'sendText', ...PHONE, text: 'أهلًا' },
+				respond: () => {
+					throw httpError(409, code, 'Muted by the spam breaker.');
+				},
+			});
+			await assert.rejects(run(ctx), (error) => {
+				assert.match(error.description, new RegExp(code));
+				assert.match(error.description, /probably looping/);
+				assert.match(error.description, /will not help until the workflow is fixed/);
+				return true;
+			});
+		});
+	}
+
+	it('other refusals carry no loop hint', async () => {
+		const { ctx } = fakeExecuteContext({
+			params: { resource: 'message', operation: 'sendText', ...PHONE, text: 'أهلًا' },
+			respond: () => {
+				throw httpError(409, 'CUSTOMER_OPTED_OUT', 'The customer asked to stop.');
+			},
+		});
+		await assert.rejects(run(ctx), (error) => {
+			assert.doesNotMatch(error.description, /probably looping/);
+			return true;
+		});
+	});
+});
+
 describe('Message → a send Meta never answered', () => {
 	it('fails the item with SEND_OUTCOME_UNKNOWN and says not to retry it automatically', async () => {
 		const { ctx, calls } = fakeExecuteContext({

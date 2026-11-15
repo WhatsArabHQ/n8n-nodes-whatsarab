@@ -64,6 +64,20 @@ export const SCOPE_DESCRIPTION =
 export const URL_HINT =
 	'WhatsArab only delivers to a public https:// URL. An n8n on localhost or a private address cannot receive WhatsArab webhooks: set n8n\'s WEBHOOK_URL to a public HTTPS address (for example through a tunnel).';
 
+/**
+ * Added to a refused create when the workspace is at its plan's webhook
+ * subscription limit. Only switched-on subscriptions count, and listening for
+ * a test event uses one of its own, so unused ones are the usual cause.
+ */
+export const PLAN_LIMIT_HINT =
+	"Your plan's webhook limit counts the switched-on subscriptions in WhatsArab → Developers → Webhooks, n8n test listeners included: listening for a test event uses a subscription of its own, next to the one of the active workflow. Delete or switch off the ones you don't use, then try again.";
+
+/** The hint a refused subscription call carries, by WhatsArab error code. */
+const REFUSAL_HINTS: Partial<Record<string, string>> = {
+	INVALID_INPUT: URL_HINT,
+	PLAN_LIMIT_REACHED: PLAN_LIMIT_HINT,
+};
+
 /** A signed body must still be what WhatsArab sends: a JSON object with a string `event`. */
 export function isWhatsArabDelivery(body: unknown): body is IDataObject & { event: string } {
 	return (
@@ -100,7 +114,7 @@ function subscriptionError(ctx: IHookFunctions, error: unknown, action: string):
 	}
 	// A NodeOperationError, not NodeApiError: n8n hands NodeApiErrors back
 	// unchanged when re-wrapped, which would drop this message.
-	const parts = [info.message, info.code === 'INVALID_INPUT' ? URL_HINT : undefined].filter(Boolean);
+	const parts = [info.message, info.code ? REFUSAL_HINTS[info.code] : undefined].filter(Boolean);
 	return new NodeOperationError(
 		ctx.getNode(),
 		`WhatsArab refused to ${action} the webhook subscription (${info.code ?? `HTTP ${info.status}`})`,
@@ -212,7 +226,7 @@ export class WhatsArabTrigger implements INodeType {
 				options: [...WHATSARAB_EVENTS],
 				default: [],
 				description:
-					'Only start the workflow for these events. Automatic mode subscribes to exactly these (empty: every event). Manual mode filters what your subscription sends (empty: accept all).',
+					'Only start the workflow for these events. Automatic mode subscribes to exactly these (empty: every event). Manual mode filters what your subscription sends (empty: accept all). A workflow that replies to customers should pick only Message Received: with every event, its own replies (Message Sent, Delivered, Read) start it again.',
 			},
 			{
 				displayName: 'Options',

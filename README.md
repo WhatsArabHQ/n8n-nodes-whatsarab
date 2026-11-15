@@ -133,7 +133,7 @@ Needs a **WhatsArab API** credential whose key has the `full` scope.
 - **Listening for a test event** creates a separate subscription for the Test URL and deletes it when n8n stops listening. The production subscription of an active workflow is left untouched.
 - **On re-activation** (or an n8n restart) it checks `GET /api/webhooks`. It keeps the subscription when the URL and events are unchanged and the subscription is switched on; otherwise it deletes it and subscribes again. WhatsArab switches a subscription off after repeated failed deliveries (an n8n that was down, for example), so re-activating the workflow brings deliveries back.
 
-WhatsArab only delivers to a **public `https://` URL**: private, loopback and cloud-metadata addresses are refused. An n8n on `localhost` cannot receive WhatsArab webhooks, so set n8n's `WEBHOOK_URL` to a public HTTPS address (for example through a tunnel). Your plan's subscription limit applies.
+WhatsArab only delivers to a **public `https://` URL**: private, loopback and cloud-metadata addresses are refused. An n8n on `localhost` cannot receive WhatsArab webhooks, so set n8n's `WEBHOOK_URL` to a public HTTPS address (for example through a tunnel). Your plan's subscription limit applies. It counts the switched-on subscriptions, n8n test listeners included; if activation fails with `PLAN_LIMIT_REACHED`, delete or switch off the subscriptions you don't use in **Developers → Webhooks**.
 
 If the key does not have the `full` scope, activation fails with *This WhatsArab API key cannot manage webhooks: automatic subscription needs the "full" scope*. Use a `full` key, or switch to Manual mode.
 
@@ -170,6 +170,8 @@ Each item has the shape WhatsArab sends:
 ```
 
 WhatsArab retries failed deliveries, so the same `deliveryId` can arrive more than once; de-duplicate on it if a double run would matter.
+
+**A workflow that replies to customers should filter to `message.received` only.** With an empty **Events** filter the trigger also fires for `message.sent`, `message.delivered` and `message.read`, so each reply the workflow sends starts it again. WhatsArab's spam breaker stops such a loop: sends to that contact fail with `AUTOMATION_SUPPRESSED`, and the contact may be opted out (`CONTACT_OPTED_OUT`). Lifting the opt-out does not help while the workflow still loops: fix the Events filter first.
 
 Events: `message.sent`, `message.delivered`, `message.read`, `message.failed`, `message.received`, `conversation.opened`, `conversation.closed`, `tag.added`, `tag.removed`, `contact.created`, `broadcast.finished`, `template.status_changed`.
 
