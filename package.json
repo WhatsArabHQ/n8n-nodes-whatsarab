@@ -3,7 +3,7 @@
 	"version": "0.2.2",
 	"description": "n8n nodes for WhatsArab: send WhatsApp text, media, buttons, lists and templates, manage contacts and tags through the WhatsArab API, and start workflows from signed WhatsArab webhooks.",
 	"license": "MIT",
-	"homepage": "https://github.com/WhatsArabHQ/n8n-nodes-whatsarab#readme",
+	"homepage": "https://whatsarab.com/integrations",
 	"keywords": [
 		"n8n-community-node-package",
 		"n8n",
