@@ -49,7 +49,7 @@ function apiError(status, code, message = `${code} message`) {
  * The smallest IHookFunctions + IWebhookFunctions the trigger touches, with
  * httpRequestWithAuthentication mocked by `respond(request)`.
  */
-function fakeContext({ mode = 'api', test = false, events = [], url = HOOK_URL, staticData = {}, respond } = {}) {
+function fakeContext({ mode = 'api', test = false, n8nMode, events = [], url = HOOK_URL, staticData = {}, respond } = {}) {
 	const calls = [];
 	const credentialsAsked = [];
 	const warnings = [];
@@ -74,7 +74,8 @@ function fakeContext({ mode = 'api', test = false, events = [], url = HOOK_URL, 
 			debug: () => {},
 		},
 		// n8n: "manual" while the editor listens for a test event; "trigger" / "webhook" in production.
-		getMode: () => (test ? 'manual' : 'trigger'),
+		// n8nMode overrides it: n8n tears test subscriptions down in mode "internal".
+		getMode: () => n8nMode ?? (test ? 'manual' : 'trigger'),
 		getWorkflow: () => ({ id: 'wf-1', name: 'New leads', active: true }),
 		getWorkflowStaticData: () => staticData,
 		getNodeWebhookUrl: () => url,
@@ -167,7 +168,7 @@ describe('automatic subscription: activate → deliveries → deactivate', () =>
 			qs: undefined,
 			json: true,
 		});
-		assert.deepEqual(f.staticData, { webhookId: SUB_ID, webhookSecret: SECRET });
+		assert.deepEqual(f.staticData, { webhookId: SUB_ID, webhookSecret: SECRET, webhookUrl: HOOK_URL });
 
 		// A delivery signed with the returned secret starts the workflow...
 		f.deliver(DELIVERY, SECRET);
@@ -264,6 +265,7 @@ describe('automatic subscription: listening for a test event on an active workfl
 			webhookSecret: SECRET,
 			testWebhookId: TEST_ID,
 			testWebhookSecret: OTHER_SECRET,
+			testWebhookUrl: TEST_URL,
 		});
 
 		// The test delivery is verified with the test subscription's secret.
@@ -281,6 +283,60 @@ describe('automatic subscription: listening for a test event on an active workfl
 		const prod = fakeContext({ staticData });
 		prod.deliver(DELIVERY, SECRET);
 		assert.deepEqual((await node.webhook.call(prod.ctx)).workflowData, [[{ json: DELIVERY }]]);
+	});
+
+	// n8n creates the test subscription in mode "manual" but tears it down in
+	// mode "internal" (cli test-webhooks.ts deactivateWebhooks). Reading the
+	// mode alone deleted the PRODUCTION subscription and orphaned the test one.
+	const bothSlots = () => ({
+		webhookId: SUB_ID,
+		webhookSecret: SECRET,
+		webhookUrl: HOOK_URL,
+		testWebhookId: TEST_ID,
+		testWebhookSecret: OTHER_SECRET,
+		testWebhookUrl: TEST_URL,
+	});
+	const okDelete = (req) => {
+		if (req.method === 'DELETE') return { success: true, data: { deleted: true } };
+		throw new Error('unexpected');
+	};
+
+	it('the end-of-test teardown (mode "internal", test URL) deletes the test subscription, not production', async () => {
+		const staticData = bothSlots();
+		const f = fakeContext({ n8nMode: 'internal', url: TEST_URL, staticData, respond: okDelete });
+		assert.equal(await hooks.delete.call(f.ctx), true);
+		assert.deepEqual(
+			f.calls.map((c) => `${c.method} ${c.url}`),
+			[`DELETE ${BASE_URL}/api/webhooks/${TEST_ID}`],
+		);
+		assert.deepEqual(staticData, { webhookId: SUB_ID, webhookSecret: SECRET, webhookUrl: HOOK_URL });
+	});
+
+	it('deactivating the workflow (mode "internal", production URL) deletes production and leaves the test slot', async () => {
+		const staticData = bothSlots();
+		const f = fakeContext({ n8nMode: 'internal', url: HOOK_URL, staticData, respond: okDelete });
+		assert.equal(await hooks.delete.call(f.ctx), true);
+		assert.deepEqual(
+			f.calls.map((c) => `${c.method} ${c.url}`),
+			[`DELETE ${BASE_URL}/api/webhooks/${SUB_ID}`],
+		);
+		assert.deepEqual(staticData, { testWebhookId: TEST_ID, testWebhookSecret: OTHER_SECRET, testWebhookUrl: TEST_URL });
+	});
+
+	it('subscriptions stored before URLs were kept: n8n\'s /webhook-test/ path still marks the test teardown', async () => {
+		const staticData = { webhookId: SUB_ID, webhookSecret: SECRET, testWebhookId: TEST_ID, testWebhookSecret: OTHER_SECRET };
+		const f = fakeContext({ n8nMode: 'internal', url: TEST_URL, staticData, respond: okDelete });
+		assert.equal(await hooks.delete.call(f.ctx), true);
+		assert.deepEqual(
+			f.calls.map((c) => `${c.method} ${c.url}`),
+			[`DELETE ${BASE_URL}/api/webhooks/${TEST_ID}`],
+		);
+		assert.deepEqual(staticData, { webhookId: SUB_ID, webhookSecret: SECRET });
+
+		const prodData = { webhookId: SUB_ID, webhookSecret: SECRET, testWebhookId: TEST_ID, testWebhookSecret: OTHER_SECRET };
+		const p = fakeContext({ n8nMode: 'internal', url: HOOK_URL, staticData: prodData, respond: okDelete });
+		assert.equal(await hooks.delete.call(p.ctx), true);
+		assert.deepEqual(p.calls.map((c) => c.url), [`${BASE_URL}/api/webhooks/${SUB_ID}`]);
 	});
 });
 
@@ -413,7 +469,7 @@ describe('Subscription setting values', () => {
 		const legacyAutomatic = fakeContext({ mode: 'automatic', respond: () => createdResponse() });
 		assert.equal(await hooks.create.call(legacyAutomatic.ctx), true);
 		assert.equal(legacyAutomatic.calls[0].method, 'POST');
-		assert.deepEqual(legacyAutomatic.staticData, { webhookId: SUB_ID, webhookSecret: SECRET });
+		assert.deepEqual(legacyAutomatic.staticData, { webhookId: SUB_ID, webhookSecret: SECRET, webhookUrl: HOOK_URL });
 	});
 });
 

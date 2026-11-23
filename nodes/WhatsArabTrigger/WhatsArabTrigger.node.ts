@@ -20,6 +20,7 @@ import { DEFAULT_TOLERANCE_SECONDS, verifySignature } from './signature';
 import {
 	type ApiSubscription,
 	clearSlot,
+	isTestHook,
 	readSlot,
 	subscriptionEvents,
 	subscriptionLabel,
@@ -97,9 +98,13 @@ function staticDataOf(ctx: IHookFunctions | IWebhookFunctions): SubscriptionStat
 	return ctx.getWorkflowStaticData('node') as SubscriptionStaticData;
 }
 
-/** n8n runs test-event listening (and its deliveries) in mode "manual"; production is anything else. */
-function isTestMode(ctx: IHookFunctions | IWebhookFunctions): boolean {
-	return typeof ctx.getMode === 'function' && ctx.getMode() === 'manual';
+/**
+ * Whether this call concerns the test-event subscription. Not the mode alone:
+ * n8n tears the test subscription down in mode "internal" (see isTestHook).
+ */
+function isTestMode(ctx: IHookFunctions | IWebhookFunctions, url?: string): boolean {
+	const mode = typeof ctx.getMode === 'function' ? ctx.getMode() : undefined;
+	return isTestHook(staticDataOf(ctx), mode, url ?? ctx.getNodeWebhookUrl('default') ?? '');
 }
 
 /** Scope refusals become one clear message; anything else keeps WhatsArab's own error. */
@@ -278,7 +283,8 @@ export class WhatsArabTrigger implements INodeType {
 			async checkExists(this: IHookFunctions): Promise<boolean> {
 				if (modeOf(this) === 'dashboard') return true;
 				const data = staticDataOf(this);
-				const test = isTestMode(this);
+				const url = this.getNodeWebhookUrl('default') ?? '';
+				const test = isTestMode(this, url);
 				const slot = readSlot(data, test);
 				if (!slot.id) return false;
 
@@ -290,7 +296,6 @@ export class WhatsArabTrigger implements INodeType {
 					throw subscriptionError(this, error, 'list');
 				}
 
-				const url = this.getNodeWebhookUrl('default') ?? '';
 				const events = subscriptionEvents(this.getNodeParameter('events', []) as string[]);
 				const existing = rows.find((row) => row.id === slot.id);
 				if (existing && slot.secret && subscriptionMatches(existing, url, events)) return true;
@@ -341,7 +346,7 @@ export class WhatsArabTrigger implements INodeType {
 						'WhatsArab created the subscription but did not return its id and signing secret',
 					);
 				}
-				writeSlot(staticDataOf(this), isTestMode(this), id, secret);
+				writeSlot(staticDataOf(this), isTestMode(this, url), id, secret, url);
 				return true;
 			},
 
