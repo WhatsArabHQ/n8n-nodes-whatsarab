@@ -13,7 +13,7 @@ import type {
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 import { WEBHOOKS_PATH } from '../WhatsArab/api';
-import { apiErrorInfo, isScopeRefusal } from '../WhatsArab/apiErrors';
+import { apiErrorInfo, isScopeRefusal, planRequiredHint } from '../WhatsArab/apiErrors';
 import { whatsArabRequest } from '../WhatsArab/transport';
 import { eventPasses, WHATSARAB_EVENTS } from './events';
 import { DEFAULT_TOLERANCE_SECONDS, verifySignature } from './signature';
@@ -119,7 +119,7 @@ function subscriptionError(ctx: IHookFunctions, error: unknown, action: string):
 	}
 	// A NodeOperationError, not NodeApiError: n8n hands NodeApiErrors back
 	// unchanged when re-wrapped, which would drop this message.
-	const parts = [info.message, info.code ? REFUSAL_HINTS[info.code] : undefined].filter(Boolean);
+	const parts = [info.message, info.code ? REFUSAL_HINTS[info.code] : undefined, planRequiredHint(info)].filter(Boolean);
 	return new NodeOperationError(
 		ctx.getNode(),
 		`WhatsArab refused to ${action} the webhook subscription (${info.code ?? `HTTP ${info.status}`})`,

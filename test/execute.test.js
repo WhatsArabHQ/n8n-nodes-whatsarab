@@ -16,8 +16,8 @@ const NODE = {
 };
 
 /** An error shaped like the one n8n's HTTP helper throws for a 4xx (Axios-style). */
-function httpError(status, code, message, { binary = false } = {}) {
-	const body = JSON.stringify({ success: false, error: { code, message } });
+function httpError(status, code, message, { binary = false, extra = {} } = {}) {
+	const body = JSON.stringify({ success: false, error: { code, message, ...extra } });
 	return Object.assign(new Error(`Request failed with status code ${status}`), {
 		response: { status, data: binary ? Buffer.from(body) : JSON.parse(body) },
 	});
@@ -115,6 +115,56 @@ describe('Message → the spam breaker refused the send', () => {
 		});
 		await assert.rejects(run(ctx), (error) => {
 			assert.doesNotMatch(error.description, /probably looping/);
+			return true;
+		});
+	});
+});
+
+// From January 1, 2027 a workspace whose free period ends with no plan stops,
+// and every API call answers 402 PLAN_REQUIRED with the owner's subscribe link.
+describe('a stopped workspace (PLAN_REQUIRED)', () => {
+	const STOP = 'This workspace needs a plan to continue: its free period has ended.';
+	it('says what to do and links where the owner subscribes', async () => {
+		const { ctx } = fakeExecuteContext({
+			params: { resource: 'message', operation: 'sendText', ...PHONE, text: 'أهلًا' },
+			respond: () => {
+				throw httpError(402, 'PLAN_REQUIRED', STOP, {
+					extra: { reason: 'free_period_ended', ended_at: '2027-01-15T00:00:00.000Z', manage_url: 'https://example.test/app/settings?tab=billing' },
+				});
+			},
+		});
+		await assert.rejects(run(ctx), (error) => {
+			assert.equal(error.message, STOP);
+			assert.match(error.description, /PLAN_REQUIRED/);
+			assert.match(error.description, /choose a plan at https:\/\/example\.test\/app\/settings\?tab=billing/);
+			assert.match(error.description, /nothing needs to change in n8n/);
+			return true;
+		});
+	});
+
+	it('without a link (or a non-https one) it names the dashboard page instead', async () => {
+		const { ctx } = fakeExecuteContext({
+			params: { resource: 'message', operation: 'sendText', ...PHONE, text: 'أهلًا' },
+			respond: () => {
+				throw httpError(402, 'PLAN_REQUIRED', STOP, { extra: { manage_url: 'javascript:alert(1)' } });
+			},
+		});
+		await assert.rejects(run(ctx), (error) => {
+			assert.match(error.description, /Settings → Billing/);
+			assert.doesNotMatch(error.description, /javascript:/);
+			return true;
+		});
+	});
+
+	it('other refusals carry no plan hint', async () => {
+		const { ctx } = fakeExecuteContext({
+			params: { resource: 'message', operation: 'sendText', ...PHONE, text: 'أهلًا' },
+			respond: () => {
+				throw httpError(409, 'CUSTOMER_OPTED_OUT', 'The customer asked to stop.');
+			},
+		});
+		await assert.rejects(run(ctx), (error) => {
+			assert.doesNotMatch(error.description, /choose a plan/);
 			return true;
 		});
 	});

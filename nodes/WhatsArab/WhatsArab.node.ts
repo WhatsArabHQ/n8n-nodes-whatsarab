@@ -13,7 +13,7 @@ import type {
 import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 import { MEDIA_PATH, MESSAGES_PATH, NUMBERS_PATH, TEMPLATES_PATH } from './api';
-import { apiErrorInfo } from './apiErrors';
+import { apiErrorInfo, planRequiredHint } from './apiErrors';
 import {
 	addContactTagRequest,
 	type ApiRequest,
@@ -236,7 +236,7 @@ function apiError(ctx: IExecuteFunctions, error: unknown, i: number, note?: stri
 			? 'The message may already have been delivered: do not retry this item automatically — check its status (the WhatsArab trigger\'s message status events) first.'
 			: '';
 	const loop = info.code === 'AUTOMATION_SUPPRESSED' || info.code === 'CONTACT_OPTED_OUT' ? LOOP_HINT : '';
-	const description = [info.code ? `WhatsArab error code: ${info.code}.` : '', unknownOutcome, loop, note ?? '']
+	const description = [info.code ? `WhatsArab error code: ${info.code}.` : '', unknownOutcome, loop, planRequiredHint(info), note ?? '']
 		.filter(Boolean)
 		.join(' ');
 	const nodeError = new NodeApiError(ctx.getNode(), error as JsonObject, {

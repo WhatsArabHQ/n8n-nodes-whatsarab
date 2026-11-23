@@ -63,9 +63,11 @@ Every operation calls `POST /api/messages`; Send Media with a file or URL calls 
 | Send Buttons | Body text with one to three reply buttons. |
 | Send List | Body text and a button that opens a menu of up to 10 rows. Rows with the same **Section** are grouped under that heading; rows without one share a section titled with the **Button Text**. |
 | Send Link Button | Body text with one button that opens a URL. |
-| Send Template | An approved template, with body parameters in order (`{{1}}`, `{{2}}` ...) or a full **Components (JSON)** array for header, body and button parameters. Templates count against your WhatsArab plan's monthly quota. |
+| Send Template | An approved template, with body parameters in order (`{{1}}`, `{{2}}` ...) or a full **Components (JSON)** array for header, body and button parameters. Templates always count toward your WhatsArab monthly business messages. |
 
 Everything except a template is free-form: WhatsApp only delivers it inside the customer's 24-hour window (opened by their last message to the sending number). Outside it the API answers `OUTSIDE_CSW` and you need a template, which works at any time.
+
+**Business messages (your WhatsArab quota).** Free-form messages don't count toward your monthly business messages until December 31, 2026. From January 1, 2027 they count like every automated message, and everything a workflow sends is automated: only replies your team types in the inbox stay outside the quota. Separately, Meta charges free-form messages to your WhatsApp Business Account at the market's utility rate after the first 1,000 service messages per business phone number per month.
 
 Common fields:
 
@@ -79,7 +81,7 @@ Common fields:
 
 **Media and numbers.** WhatsApp ties an uploaded media ID to the number that uploaded it and refuses it in a send from any other number. Send Media with a file or URL uploads from the chosen **From Number** and then sends from the number the upload answer names, so the two always match. To send one file to many customers, upload it once with Media → Upload and send its `media_id` with **Media Source** *Media ID* and the same number, instead of uploading it again for every item. WhatsApp keeps uploaded media for about 30 days.
 
-The node outputs the API's `data` object: `message_id` (the WhatsApp message id, to match delivery events), the recipient echoed back masked, `kind`, `status` (`sent`, or `dry_run` on a dry run, which also returns `quota_remaining` and, for free-form messages, `window_open`) and `from` (the number that sent). Send Media with a file or URL also outputs the `media_id` it uploaded. API errors (opted-out contact, closed window, invalid number...) surface as n8n errors that lead with WhatsArab's message and name its error code; enable **Continue On Fail** to keep going per item.
+The node outputs the API's `data` object: `message_id` (the WhatsApp message id, to match delivery events), the recipient echoed back masked, `kind`, `status` (`sent`, or `dry_run` on a dry run, which also returns `quota_remaining` and, for free-form messages, `window_open`) and `from` (the number that sent). Send Media with a file or URL also outputs the `media_id` it uploaded. API errors (opted-out contact, closed window, invalid number...) surface as n8n errors that lead with WhatsArab's message and name its error code; enable **Continue On Fail** to keep going per item. When the workspace is stopped (its free period or subscription ended with no plan), every call fails with `PLAN_REQUIRED` and the error links to where the owner chooses a plan; the workflow works again the moment the workspace subscribes, with nothing to change in n8n.
 
 ### Media
 

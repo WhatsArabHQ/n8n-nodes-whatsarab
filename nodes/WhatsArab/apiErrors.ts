@@ -15,6 +15,8 @@ export interface ApiErrorInfo {
 	code?: string;
 	/** WhatsArab error message from the body. */
 	message?: string;
+	/** Where the owner subscribes: sent with PLAN_REQUIRED (402, a stopped workspace). */
+	manageUrl?: string;
 }
 
 type Loose = { [key: string]: unknown };
@@ -28,7 +30,7 @@ function asStatus(value: unknown): number | undefined {
 	return typeof n === 'number' && Number.isInteger(n) && n >= 100 && n <= 599 ? n : undefined;
 }
 
-function bodyError(raw: unknown): { code?: string; message?: string } {
+function bodyError(raw: unknown): { code?: string; message?: string; manageUrl?: string } {
 	// A binary download (GET /api/media/{id}) fails with its JSON error body as bytes.
 	let body: unknown = raw;
 	if (body instanceof ArrayBuffer) body = Buffer.from(body);
@@ -46,6 +48,7 @@ function bodyError(raw: unknown): { code?: string; message?: string } {
 	return {
 		code: typeof err.code === 'string' ? err.code : undefined,
 		message: typeof err.message === 'string' ? err.message : undefined,
+		manageUrl: typeof err.manage_url === 'string' && /^https:\/\//.test(err.manage_url) ? err.manage_url : undefined,
 	};
 }
 
@@ -68,10 +71,22 @@ export function apiErrorInfo(error: unknown): ApiErrorInfo {
 			const fromBody = bodyError(body);
 			if (info.code === undefined && fromBody.code !== undefined) info.code = fromBody.code;
 			if (info.message === undefined && fromBody.message !== undefined) info.message = fromBody.message;
+			if (info.manageUrl === undefined && fromBody.manageUrl !== undefined) info.manageUrl = fromBody.manageUrl;
 		}
 		current = asObject(current.cause);
 	}
 	return info;
+}
+
+/**
+ * A stopped workspace (402 PLAN_REQUIRED: its free period or subscription
+ * ended with no plan) answers every call this way. WhatsArab's message says
+ * why; this adds what to do, with the owner's subscribe link when it came.
+ */
+export function planRequiredHint(info: ApiErrorInfo): string {
+	if (info.code !== 'PLAN_REQUIRED') return '';
+	const where = info.manageUrl ? `at ${info.manageUrl}` : 'in WhatsArab → Settings → Billing';
+	return `The workspace owner can choose a plan ${where}. The API key and this workflow keep working the moment the workspace subscribes: nothing needs to change in n8n.`;
 }
 
 /**

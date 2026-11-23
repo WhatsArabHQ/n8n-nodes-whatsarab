@@ -37,11 +37,11 @@ const NODE = {
 };
 
 /** A WhatsArab error the way n8n hands it to a node: a NodeApiError around the HTTP failure. */
-function apiError(status, code, message = `${code} message`) {
+function apiError(status, code, message = `${code} message`, extra = {}) {
 	return new NodeApiError(NODE, {
 		message: `Request failed with status code ${status}`,
 		httpCode: String(status),
-		response: { status, data: { success: false, error: { code, message } } },
+		response: { status, data: { success: false, error: { code, message, ...extra } } },
 	});
 }
 
@@ -475,6 +475,23 @@ describe('Subscription setting values', () => {
 
 describe('automatic subscription: refusals', () => {
 	const hooks = new WhatsArabTrigger().webhookMethods.default;
+
+	it('a stopped workspace (402 PLAN_REQUIRED) on activation links where the owner subscribes', async () => {
+		const f = fakeContext({
+			respond: () => {
+				throw apiError(402, 'PLAN_REQUIRED', 'This workspace needs a plan to continue: its free period has ended.', {
+					manage_url: 'https://example.test/app/settings?tab=billing',
+				});
+			},
+		});
+		await assert.rejects(hooks.create.call(f.ctx), (error) => {
+			assert.match(error.message, /PLAN_REQUIRED/);
+			assert.match(error.description, /free period has ended/);
+			assert.match(error.description, /choose a plan at https:\/\/example\.test\/app\/settings\?tab=billing/);
+			return true;
+		});
+		assert.deepEqual(f.staticData, {});
+	});
 
 	it('explains a key without the full scope (403 INSUFFICIENT_SCOPE) on activation', async () => {
 		const f = fakeContext({
